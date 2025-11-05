@@ -262,6 +262,15 @@
             border-left: 4px solid #3498db;
         }
 
+        .client-card.admin {
+            border-left-color: #e74c3c;
+            background: #fff5f5;
+        }
+
+        .client-card.user {
+            border-left-color: #3498db;
+        }
+
         .client-header {
             display: flex;
             justify-content: space-between;
@@ -272,6 +281,25 @@
         .client-username {
             font-weight: 600;
             color: #2c3e50;
+        }
+
+        .client-role {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7em;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .role-admin {
+            background: #ffeaa7;
+            color: #e17055;
+        }
+
+        .role-user {
+            background: #dfe6e9;
+            color: #636e72;
         }
 
         .client-socket {
@@ -529,7 +557,7 @@
                 });
 
                 document.getElementById('refresh-clients').addEventListener('click', () => {
-                    this.refreshClients();
+                    this.socket.emit('get-clients');
                 });
             }
 
@@ -553,6 +581,11 @@
                     this.updateConnectionStats(devices);
                 });
 
+                this.socket.on('clients-update', (clients) => {
+                    this.updateClientsList(clients);
+                    this.updateConnectionStats();
+                });
+
                 this.socket.on('device-connected', (data) => {
                     this.addLog(`Device connected: ${data.deviceId} (${data.deviceName})`, 'connection');
                 });
@@ -566,7 +599,7 @@
                 });
 
                 this.socket.on('client-login', (data) => {
-                    this.addLog(`Client login: ${data.username}`, 'info');
+                    this.addLog(`Client login: ${data.username} (${data.role})`, 'info');
                 });
 
                 this.socket.on('client-disconnected', (data) => {
@@ -574,7 +607,7 @@
                 });
 
                 this.socket.on('start-command', (data) => {
-                    this.addLog(`START command received from client`, 'command');
+                    this.addLog(`START command received from admin`, 'command');
                 });
 
                 this.socket.on('command-sent', (data) => {
@@ -599,15 +632,13 @@
                 }
             }
 
-            updateConnectionStats(devices) {
-                const clients = devices.filter(d => d.type === 'client').length;
+            updateConnectionStats(devices = []) {
+                const clients = Array.from(document.querySelectorAll('.client-card')).length;
                 const deviceCount = devices.filter(d => d.type === 'device').length;
                 
                 document.getElementById('devices-count').textContent = deviceCount;
                 document.getElementById('clients-count').textContent = clients;
-                document.getElementById('total-connections').textContent = devices.length;
-                
-                this.updateClientsList(devices.filter(d => d.type === 'client'));
+                document.getElementById('total-connections').textContent = clients + deviceCount;
             }
 
             updateClientsList(clients) {
@@ -619,11 +650,12 @@
                 }
 
                 clientsList.innerHTML = clients.map(client => `
-                    <div class="client-card">
+                    <div class="client-card ${client.role}">
                         <div class="client-header">
                             <div class="client-username">${client.username}</div>
-                            <div class="client-socket">${client.socketId}</div>
+                            <div class="client-role role-${client.role}">${client.role}</div>
                         </div>
+                        <div class="client-socket">Socket: ${client.socketId}</div>
                         <div class="client-time">
                             Connected: ${new Date(client.connectedAt).toLocaleString()}
                         </div>
@@ -657,11 +689,6 @@
                         ` : ''}
                     </div>
                 `).join('');
-            }
-
-            refreshClients() {
-                this.addLog('Refreshing clients list...', 'info');
-                // Clients list is updated automatically via devices-update event
             }
 
             addLog(message, type = 'info') {

@@ -24,6 +24,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 const connectedClients = new Map();
 const connectedDevices = new Map();
 
+// User database with roles
+const users = {
+  'admin': {
+    password: 'admin123',
+    id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    role: 'admin',
+    username: 'admin'
+  },
+  'user1': {
+    password: 'user123', 
+    id: 'b2c3d4e5-f6g7-8901-bcde-f23456789012',
+    role: 'user',
+    username: 'user1'
+  }
+};
+
 // Routes
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -40,17 +56,17 @@ app.post('/api/login', (req, res) => {
   
   console.log('Login attempt:', username);
   
-  // Simple authentication - in production use proper authentication
-  if ((username === 'admin' && password === 'admin123') || 
-      (username === 'user1' && password === 'user123')) {
-    
-    console.log('Login successful:', username);
+  const user = users[username];
+  
+  if (user && user.password === password) {
+    console.log('Login successful:', username, 'Role:', user.role);
     res.json({ 
       success: true, 
       message: 'Login successful',
       user: {
-        username,
-        id: Math.random().toString(36).substr(2, 9)
+        username: user.username,
+        id: user.id,
+        role: user.role
       }
     });
   } else {
@@ -85,17 +101,28 @@ io.on('connection', (socket) => {
 
   // Client login
   socket.on('client-login', (userData) => {
-    console.log('Client login:', userData.username);
+    console.log('Client login:', userData.username, 'Role:', userData.role);
     
-    connectedClients.set(socket.id, {
+    const clientInfo = {
       ...userData,
       socketId: socket.id,
       type: 'client',
-      connectedAt: new Date().toISOString()
+      connectedAt: new Date().toISOString(),
+      role: userData.role || 'user'
+    };
+    
+    connectedClients.set(socket.id, clientInfo);
+    
+    socket.emit('login-success', { 
+      message: 'Logged in successfully',
+      role: userData.role
     });
     
-    socket.emit('login-success', { message: 'Logged in successfully' });
-    io.emit('devices-update', Array.from(connectedDevices.values()));
+    // Send current devices list to the client
+    socket.emit('devices-update', Array.from(connectedDevices.values()));
+    
+    // Update all dashboard clients with new clients list
+    io.emit('clients-update', Array.from(connectedClients.values()));
     
     console.log('Connected clients:', connectedClients.size);
   });
@@ -145,7 +172,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    console.log('Start command from:', client.username);
+    // Check if user has permission (only admin can send commands)
+    if (client.role !== 'admin') {
+      socket.emit('error', 'Access denied. Admin privileges required.');
+      return;
+    }
+
+    console.log('Start command from admin:', client.username);
 
     if (connectedDevices.size > 0) {
       let commandsSent = 0;
@@ -202,6 +235,11 @@ io.on('connection', (socket) => {
     socket.emit('devices-update', Array.from(connectedDevices.values()));
   });
 
+  // Get clients list
+  socket.on('get-clients', () => {
+    socket.emit('clients-update', Array.from(connectedClients.values()));
+  });
+
   // Handle disconnection
   socket.on('disconnect', (reason) => {
     console.log('Disconnected:', socket.id, 'Reason:', reason);
@@ -215,6 +253,9 @@ io.on('connection', (socket) => {
         username: client.username,
         message: 'Client disconnected'
       });
+      
+      // Update clients list
+      io.emit('clients-update', Array.from(connectedClients.values()));
     }
     
     const device = connectedDevices.get(socket.id);
@@ -246,8 +287,8 @@ server.listen(PORT, () => {
   console.log('🚀 ========================================');
   console.log('📍 Access the server at: http://localhost:' + PORT);
   console.log('👤 Demo accounts:');
-  console.log('   - admin / admin123');
-  console.log('   - user1 / user123');
+  console.log('   - admin / admin123 (Admin privileges)');
+  console.log('   - user1 / user123 (User - limited access)');
   console.log('📱 Waiting for clients and devices...');
   console.log('============================================');
 });
